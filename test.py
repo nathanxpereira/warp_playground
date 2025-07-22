@@ -1,5 +1,6 @@
 import warp as wp
 import numpy as np
+import newton
 
 # Initialize Warp
 wp.init()

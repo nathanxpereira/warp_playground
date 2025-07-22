@@ -1,2 +1,4 @@
 warp-lang
 numpy
+matplotlib
+newton
