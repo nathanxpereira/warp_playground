@@ -17,7 +17,7 @@ class CartPoleSimulation:
 
         # Simulation parameters
         self.dt = 1.0 / 60.0  # 60 FPS
-        self.sim_substeps = 10
+        self.sim_substeps = 1
         self.sim_dt = self.dt / self.sim_substeps
         
         # Physical parameters
@@ -301,9 +301,11 @@ class CartPoleSimulation:
         if camera_target is None:
             camera_target = (0.0, 0.0, 0.0)
             
-        self.renderer = wp.sim.render.SimRenderer(
-            self.model, 
-            stage_path="cartpole.usd",
+        self.renderer = warp.sim.render.SimRenderer(
+            model=self.model, 
+            path="cartpole.usd",
+            up_axis='Y',
+            fps=1/self.dt,
             scaling=1.0
         )
         
@@ -328,13 +330,11 @@ def main():
     sim = CartPoleSimulation(num_envs=2)
     
     # Create renderer (optional)
-    try:
-        renderer = sim.create_renderer()
-        has_renderer = True
-        print("Renderer created successfully")
-    except Exception as e:
-        print(f"Could not create renderer: {e}")
-        has_renderer = False
+    renderer = sim.create_renderer()
+    has_renderer = True
+    print("Renderer created successfully")
+    # print(f"Could not create renderer: {e}")
+    # has_renderer = False
     
     # Simple PD controller for demonstration
     def pd_controller(state, target_angle=0.0, kp=20.0, kd=5.0):
@@ -372,7 +372,7 @@ def main():
         sim.step()
         
         # Print status every 60 steps
-        if step % 60 == 0:
+        if step % 1 == 0:
             print(f"\nStep {step}:")
             for env_id in range(sim.num_envs):
                 state = sim.get_state(env_id)
@@ -387,7 +387,7 @@ def main():
                     sim.reset([env_id])
         
         # Render first environment
-        if has_renderer and step % 10 == 0:
+        if has_renderer and step % 1 == 0:
             sim.render(0)
 
 if __name__ == "__main__":

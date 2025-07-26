@@ -2,3 +2,4 @@ warp-lang
 numpy
 matplotlib
 newton
+usd-core
