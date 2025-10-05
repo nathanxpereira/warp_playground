@@ -1,9 +1,7 @@
-import warp as wp
-import warp.sim
-import warp.sim.render
 import numpy as np
 import math
-
+import newton
+import warp as wp
 # Initialize Warp
 wp.init()
 
@@ -44,7 +42,7 @@ class CartPoleSimulation:
     
     def _build_simulation(self):
         """Build the cart pole simulation model"""
-        self.builder = warp.sim.ModelBuilder()
+        self.builder = newton.ModelBuilder()
         
         # Create environments
         for env_id in range(self.num_envs):
@@ -67,7 +65,7 @@ class CartPoleSimulation:
         self.controls = [wp.zeros(int(self.model.joint_count/self.num_envs), dtype=wp.float32, device=self.device) 
                         for _ in range(self.num_envs)]
         
-        self.integrator = warp.sim.SemiImplicitIntegrator()
+        self.integrator = newton.SemiImplicitIntegrator()
 
     
     def _create_cartpole_env(self, env_id, offset):
@@ -152,7 +150,7 @@ class CartPoleSimulation:
         # Add control for cart force (will be applied to the prismatic joint)
         # Note: Control will be applied via joint forces during simulation
     
-    def _reset_env_state(self, state: warp.sim.State, env_id):
+    def _reset_env_state(self, state: newton.State, env_id):
         """Reset environment to initial conditions with some randomization"""
         # Find bodies for this environment
         cart_idx = None
@@ -224,7 +222,7 @@ class CartPoleSimulation:
         """Step the simulation forward"""
         for env_id in range(self.num_envs):
             for _ in range(self.sim_substeps):
-                warp.sim.collide(self.model, self.states[env_id])
+                newton.collide(self.model, self.states[env_id])
                 
                 self.state_prev = self.states[env_id]
                 self.state_next = self.model.state(requires_grad=True)
@@ -245,7 +243,7 @@ class CartPoleSimulation:
         if env_id >= len(self.states):
             return None
         
-        state:warp.sim.State = self.states[env_id]
+        state:newton.State = self.states[env_id]
         
         # Find cart and pole bodies
         cart_idx = pole_idx = None
@@ -301,7 +299,7 @@ class CartPoleSimulation:
         if camera_target is None:
             camera_target = (0.0, 0.0, 0.0)
             
-        self.renderer = warp.sim.render.SimRenderer(
+        self.renderer = newton.render.SimRenderer(
             model=self.model, 
             path="cartpole.usd",
             up_axis='Y',
@@ -323,7 +321,7 @@ class CartPoleSimulation:
 
 # Example usage with simple control loop
 def main():
-    print("Cart Pole Simulation with Warp.sim")
+    print("Cart Pole Simulation with newton")
     print("==================================")
     
     # Create simulation
