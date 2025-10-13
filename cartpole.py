@@ -107,7 +107,7 @@ def main():
     stage.Export("cartpole.usd")
     print("Simulation saved to cartpole.usd")
     
-    controller = LQRController()  # or PIDController()
+    controller = PIDController()
     
     reset_needed = False
     try:
