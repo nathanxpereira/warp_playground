@@ -2,12 +2,12 @@
 exploring NVIDIA warp
 
 ```
-conda create -p ./envs/env3.11 python=3.11
+conda create -p ./.envs/env3.11 python=3.11
 ```
 
 ```
 conda init
-conda activate ./envs/envs3.12
+conda activate ./.envs/envs3.11
 ```
 
 ```
