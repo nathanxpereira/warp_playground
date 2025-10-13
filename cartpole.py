@@ -8,7 +8,7 @@ from isaacsim.core.api.tasks import BaseTask
 from isaacsim.core.prims import RigidPrim
 import omni.usd
 from pxr import Gf, UsdPhysics, UsdGeom, Sdf
-from scipy.linalg import solve_continuous_are
+from controller import *
 
 class CartPole(BaseTask):
     def __init__(self, name, num_envs, offset=None) -> None:
@@ -95,28 +95,7 @@ class CartPole(BaseTask):
     def is_done(self) -> None:
         return torch.zeros(self._num_envs, device=self._device)
 
-def compute_lqr_gains(m_cart=1.0, m_pole=0.1, l=0.5, g=9.81):
-    """Compute LQR gains for cart-pole system
-    State: [x, x_dot, theta, theta_dot]
-    """
-    # Linearized dynamics: x_dot = A*x + B*u
-    M = m_cart + m_pole
-    A = np.array([
-        [0, 1, 0, 0],
-        [0, 0, -m_pole*g/M, 0],
-        [0, 0, 0, 1],
-        [0, 0, g*M/(l*M), 0]
-    ])
-    B = np.array([[0], [1/M], [0], [-1/(l*M)]])
-    
-    # Cost matrices: minimize state deviation and control effort
-    Q = np.diag([10.0, 1.0, 100.0, 10.0])  # Penalize position, velocity, angle, angular velocity
-    R = np.array([[1.0]])  # Control effort penalty
-    
-    # Solve continuous-time algebraic Riccati equation
-    P = solve_continuous_are(A, B, Q, R)
-    K = np.linalg.inv(R) @ B.T @ P
-    return K.flatten()
+
 
 def main():
     my_world = World(stage_units_in_meters=1.0, physics_prim_path="/physicsScene", backend="torch", device="cuda:0")
@@ -128,9 +107,7 @@ def main():
     stage.Export("cartpole.usd")
     print("Simulation saved to cartpole.usd")
     
-    # LQR controller gains
-    K = compute_lqr_gains()
-    print(f"LQR gains: {K}")
+    controller = LQRController()  # or PIDController()
     
     reset_needed = False
     try:
@@ -143,18 +120,7 @@ def main():
                     reset_needed = False
                 
                 observations = my_world.get_observations()
-                
-                # Extract state: [x, x_dot, theta, theta_dot]
-                cart_pos = observations["cart_position"][:, 0]
-                cart_vel = observations["cart_velocity"][:, 0]
-                pole_rot = observations["pole_rotation"]
-                pole_angle = 2 * torch.atan2(pole_rot[:, 1], pole_rot[:, 3])
-                pole_angular_vel = observations["pole_velocity"][:, 4]
-                
-                # LQR control: u = -K*x
-                state = torch.stack([cart_pos, cart_vel, pole_angle, pole_angular_vel], dim=1)
-                K_tensor = torch.tensor(K, device=state.device, dtype=state.dtype)
-                force = -(state * K_tensor).sum(dim=1)
+                force = controller.compute_control(observations, my_world.device)
                 my_task.apply_control(force)
                 
             my_world.step(render=True)
