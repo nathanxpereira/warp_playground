@@ -7,7 +7,7 @@ conda create -p ./.envs/env3.11 python=3.11
 
 ```
 conda init
-conda activate ./.envs/envs3.11
+conda activate ./.envs/env3.11
 ```
 
 ```

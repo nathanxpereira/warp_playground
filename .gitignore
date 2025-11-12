@@ -1,2 +1,3 @@
 /.envs/*
 *.usd
+**__pycache__

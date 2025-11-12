@@ -15,6 +15,15 @@ class CartPole(BaseTask):
         BaseTask.__init__(self, name=name, offset=offset)
         self._num_envs = num_envs
 
+        self.cart_length = 0.4
+        self.cart_width = 0.3
+        self.cart_height = 0.2
+        self.cart_mass = 1.0
+
+        self.pole_radius = 0.02
+        self.pole_height = 1.0
+        self.pole_mass = 0.1
+
     def set_up_scene(self, scene) -> None:
         super().set_up_scene(scene)
         scene.add_default_ground_plane()
@@ -27,31 +36,32 @@ class CartPole(BaseTask):
 
     def _create_cartpole(self):
         stage = omni.usd.get_context().get_stage()
+        start_angle = 5.0
         
         # Cart
         cart_prim = stage.DefinePrim("/World/Cart_0", "Xform")
         cart_geom = UsdGeom.Cube.Define(stage, "/World/Cart_0/Geom")
         cart_geom.CreateSizeAttr(1.0)
-        cart_geom.GetPrim().CreateAttribute("xformOp:scale", Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(0.4, 0.3, 0.2))
-        cart_geom.GetPrim().CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3).Set(Gf.Vec3d(0, 0, 0.1))
+        cart_geom.GetPrim().CreateAttribute("xformOp:scale", Sdf.ValueTypeNames.Float3).Set(Gf.Vec3f(self.cart_length, self.cart_width, self.cart_height))
+        cart_geom.GetPrim().CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3).Set(Gf.Vec3d(0, 0, self.cart_height/2))
         cart_geom.CreateXformOpOrderAttr().Set(["xformOp:translate", "xformOp:scale"])
         UsdPhysics.CollisionAPI.Apply(cart_geom.GetPrim())
         UsdPhysics.RigidBodyAPI.Apply(cart_prim)
-        UsdPhysics.MassAPI.Apply(cart_prim).CreateMassAttr(1.0)
+        UsdPhysics.MassAPI.Apply(cart_prim).CreateMassAttr(self.cart_mass)
         
         # Pole with 15 degree initial angle
         pole_prim = stage.DefinePrim("/World/Pole_0", "Xform")
-        UsdGeom.Xformable(pole_prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, 0.2))
-        UsdGeom.Xformable(pole_prim).AddRotateYOp().Set(15.0)
+        UsdGeom.Xformable(pole_prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, self.cart_height))
+        UsdGeom.Xformable(pole_prim).AddRotateYOp().Set(start_angle)
         
         pole_geom = UsdGeom.Cylinder.Define(stage, "/World/Pole_0/Geom")
-        pole_geom.CreateRadiusAttr(0.02)
-        pole_geom.CreateHeightAttr(1.0)
-        pole_geom.GetPrim().CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3).Set(Gf.Vec3d(0, 0, 0.5))
+        pole_geom.CreateRadiusAttr(self.pole_radius)
+        pole_geom.CreateHeightAttr(self.pole_height)
+        pole_geom.GetPrim().CreateAttribute("xformOp:translate", Sdf.ValueTypeNames.Double3).Set(Gf.Vec3d(0, 0, self.pole_height/2))
         pole_geom.CreateXformOpOrderAttr().Set(["xformOp:translate"])
         UsdPhysics.CollisionAPI.Apply(pole_geom.GetPrim())
         UsdPhysics.RigidBodyAPI.Apply(pole_prim)
-        UsdPhysics.MassAPI.Apply(pole_prim).CreateMassAttr(0.1)
+        UsdPhysics.MassAPI.Apply(pole_prim).CreateMassAttr(self.pole_mass)
         
         # Prismatic joint - cart constrained to X-axis
         cart_joint = stage.DefinePrim("/World/CartJoint", "PhysicsPrismaticJoint")
@@ -66,7 +76,7 @@ class CartPole(BaseTask):
         joint = UsdPhysics.RevoluteJoint(pole_joint)
         joint.CreateBody0Rel().SetTargets(["/World/Cart_0"])
         joint.CreateBody1Rel().SetTargets(["/World/Pole_0"])
-        joint.CreateLocalPos0Attr(Gf.Vec3f(0, 0, 0.2))  # Top of cart
+        joint.CreateLocalPos0Attr(Gf.Vec3f(0, 0, self.cart_height))  # Top of cart
         joint.CreateLocalPos1Attr(Gf.Vec3f(0, 0, 0))    # Bottom of pole (at pole origin)
         joint.CreateAxisAttr("Y")
 
@@ -104,10 +114,10 @@ def main():
     my_world.reset()
     
     stage = omni.usd.get_context().get_stage()
-    stage.Export("cartpole.usd")
+    stage.Export("cartpole/cartpole.usd")
     print("Simulation saved to cartpole.usd")
     
-    controller = PIDController()
+    controller = LQRController()
     
     reset_needed = False
     try:

@@ -12,9 +12,13 @@ class Controller(ABC):
 class LQRController(Controller):
     def __init__(self, m_cart=1.0, m_pole=0.1, l=0.5, g=9.81):
         M = m_cart + m_pole
-        A = np.array([[0, 1, 0, 0], [0, 0, -m_pole*g/M, 0], [0, 0, 0, 1], [0, 0, g*M/(l*M), 0]])
-        B = np.array([[0], [1/M], [0], [-1/(l*M)]])
-        Q = np.diag([10.0, 1.0, 100.0, 10.0])
+        M2 = 4*m_cart+m_pole
+        A = np.array([[0, 1, 0, 0], 
+                      [0, 0, -3*m_pole*g/M2, 0], 
+                      [0, 0, 0, 1], 
+                      [0, 0, 6*g*M/(l*M2), 0]])
+        B = np.array([[0], [4/M2], [0], [-6/(l*M2)]])
+        Q = np.diag([10.0, 1.0, 10.0, 10.0])
         R = np.array([[1.0]])
         P = solve_continuous_are(A, B, Q, R)
         self.K = (np.linalg.inv(R) @ B.T @ P).flatten()
