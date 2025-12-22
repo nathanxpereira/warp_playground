@@ -23,6 +23,7 @@ class CartPole(BaseTask):
         self.pole_radius = 0.02
         self.pole_height = 1.0
         self.pole_mass = 0.1
+        self.start_angle = 5.0
 
     def set_up_scene(self, scene) -> None:
         super().set_up_scene(scene)
@@ -36,7 +37,6 @@ class CartPole(BaseTask):
 
     def _create_cartpole(self):
         stage = omni.usd.get_context().get_stage()
-        start_angle = 5.0
         
         # Cart
         cart_prim = stage.DefinePrim("/World/Cart_0", "Xform")
@@ -49,10 +49,10 @@ class CartPole(BaseTask):
         UsdPhysics.RigidBodyAPI.Apply(cart_prim)
         UsdPhysics.MassAPI.Apply(cart_prim).CreateMassAttr(self.cart_mass)
         
-        # Pole with 15 degree initial angle
+        # Pole with initial angle
         pole_prim = stage.DefinePrim("/World/Pole_0", "Xform")
         UsdGeom.Xformable(pole_prim).AddTranslateOp().Set(Gf.Vec3d(0, 0, self.cart_height))
-        UsdGeom.Xformable(pole_prim).AddRotateYOp().Set(start_angle)
+        UsdGeom.Xformable(pole_prim).AddRotateYOp().Set(self.start_angle)
         
         pole_geom = UsdGeom.Cylinder.Define(stage, "/World/Pole_0/Geom")
         pole_geom.CreateRadiusAttr(self.pole_radius)
@@ -104,6 +104,14 @@ class CartPole(BaseTask):
 
     def is_done(self) -> None:
         return torch.zeros(self._num_envs, device=self._device)
+    
+    def reset_state(self):
+        angle_rad = np.radians(self.start_angle)
+        pole_quat = torch.tensor([[np.cos(angle_rad/2), 0, np.sin(angle_rad/2), 0]], dtype=torch.float32, device=self._device)
+        self._carts.set_world_poses(torch.tensor([[0, 0, self.cart_height/2]], dtype=torch.float32, device=self._device))
+        self._poles.set_world_poses(torch.tensor([[0, 0, self.cart_height]], dtype=torch.float32, device=self._device), pole_quat)
+        self._carts.set_velocities(torch.zeros((1, 6), dtype=torch.float32, device=self._device))
+        self._poles.set_velocities(torch.zeros((1, 6), dtype=torch.float32, device=self._device))
 
 
 
@@ -112,14 +120,15 @@ def main():
     my_task = CartPole(name="cartpole", num_envs=1)
     my_world.add_task(my_task)
     my_world.reset()
+    my_world.pause()
     
     stage = omni.usd.get_context().get_stage()
     stage.Export("cartpole/cartpole.usd")
     print("Simulation saved to cartpole.usd")
     
-    controller = LQRController()
+    controller = LQRController(m_cart=my_task.cart_mass, m_pole=my_task.pole_mass, l=my_task.pole_height)
     
-    reset_needed = False
+    reset_needed = True
     try:
         while simulation_app.is_running():
             if my_world.is_stopped() and not reset_needed:
@@ -127,12 +136,16 @@ def main():
             if my_world.is_playing():
                 if reset_needed:
                     my_world.reset(soft=True)
+                    my_task.reset_state()
+                    for _ in range(3):
+                        my_world.step(render=False)
+                    controller.reset()
                     reset_needed = False
                 
                 observations = my_world.get_observations()
                 force = controller.compute_control(observations, my_world.device)
                 my_task.apply_control(force)
-                
+            
             my_world.step(render=True)
     finally:
         my_world.stop()
