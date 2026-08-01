@@ -11,6 +11,8 @@ import seaborn as sns
 from pathlib import Path
 import numpy as np
 
+from tuning.metrics import settling_time, overshoot
+
 
 def find_most_recent_log(log_dir: Path) -> Path:
     """Find the most recent CSV log file in the logs directory."""
@@ -171,6 +173,8 @@ def create_plots(df: pl.DataFrame, output_path: Path = None):
     max_cart_pos = df['abs_cart_position'].max()
     mean_force = df.select(pl.col('control_force').abs().mean()).item()
     max_force = df.select(pl.col('control_force').abs().max()).item()
+    st = settling_time(time, df['pole_angle'].to_numpy())
+    ov = overshoot(df['pole_angle'].to_numpy(), df['pole_angle'][0])
 
     fig.add_trace(
         go.Table(
@@ -181,10 +185,12 @@ def create_plots(df: pl.DataFrame, output_path: Path = None):
             cells=dict(values=[
                 ['Final Pole Angle', 'Max Pole Angle', 'Final Cart Position',
                  'Max Cart Position', 'Mean |Force|', 'Max |Force|',
-                 'Simulation Time', 'Steps'],
+                 'Settling Time', 'Overshoot', 'Simulation Time', 'Steps'],
                 [f'{final_pole_angle:.3f}°', f'{max_pole_angle:.3f}°',
                  f'{final_cart_pos:.4f} m', f'{max_cart_pos:.4f} m',
                  f'{mean_force:.2f} N', f'{max_force:.2f} N',
+                 f'{st:.3f} s' if np.isfinite(st) else 'never',
+                 f'{ov:.1%}',
                  f'{time[-1]:.2f} s', f'{len(df)}']
             ],
             fill_color='white',
