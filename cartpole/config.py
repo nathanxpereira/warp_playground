@@ -4,26 +4,25 @@ from dataclasses import dataclass
 import numpy as np
 
 
-@dataclass(frozen=True)
 class CartPolePhysicsConfig:
-    """Physical parameters for the cartpole system."""
+    def __init__(self, cart_mass, pole_mass, pole_length):
 
-    # Cart parameters
-    cart_length: float = 0.4
-    cart_width: float = 0.3
-    cart_height: float = 0.2
-    cart_mass: float = 1.0
+        if cart_mass is None: raise Exception("Cart Mass cannot be None")
+        if pole_mass is None: raise Exception("Pole Mass cannot be None")
+        if pole_length is None: 
+            pole_length = 1.0 
+            print("Pole length cannot be None. Setting as 1.0")
 
-    # Pole parameters
-    pole_radius: float = 0.02
-    pole_length: float = 1.0
-    pole_mass: float = 0.1
+        # Cart parameters
+        self.cart_mass: float = cart_mass
 
-    # Initial conditions
-    start_angle_degrees: float = 5.0
+        # Pole parameters
+        self.pole_length: float = pole_length
+        self.pole_mass: float = pole_mass
 
-    # Constants
-    gravity: float = 9.81
+        # Constants
+        self.gravity: float = 9.81
+    
 
     def compute_system_matrices(self) -> tuple[np.ndarray, np.ndarray]:
         """Compute linearized state-space matrices A and B.
@@ -59,11 +58,3 @@ class CartPolePhysicsConfig:
 
         return A, B
 
-
-@dataclass(frozen=True)
-class SimulationConfig:
-    """Simulation control parameters."""
-
-    warmup_steps: int = 3
-    render: bool = True
-    physics_dt: float = 1.0/60.0

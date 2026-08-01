@@ -1,7 +1,7 @@
-# PyTorch with CUDA 12.8 support
-# Note: Requires CUDA-compatible GPU
---extra-index-url https://pypi.nvidia.com
---index-url https://download.pytorch.org/whl/cu130
-isaacsim[all,extscache]==5.1.0
-torch
-torchvision
+isaacsim[all,extscache]==6.0.1 --extra-index-url https://pypi.nvidia.com
+
+# Analysis and visualization
+polars>=0.20.0
+plotly>=5.18.0
+seaborn>=0.13.0
+kaleido  # For static image export from plotly

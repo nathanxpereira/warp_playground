@@ -26,6 +26,8 @@ dependencies = [
     "plotly",
     "scipy>=1.10.0",
     "numpy>=1.24.0",
+    "polars",
+    "seaborn",
 ]
 
 [project.optional-dependencies]

@@ -1,64 +1,10 @@
 # Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
+*/**/__pycache__/
 *.egg-info/
-dist/
-build/
-*.egg
-.pytest_cache/
-.coverage
-htmlcov/
-*.log
-
-# Virtual Environments
-.envs/
-venv/
-env/
-ENV/
 .venv/
-
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
-*~
-.DS_Store
-
-# NVIDIA Omniverse & Isaac Sim
-*.usd
-*.usda
-*.usdc
-omni.log
-kit.log
-*.log
-.cache/
-logs/
+.claude/
 
 # Results & Generated Files
-*_results.json
-*_results.png
-*.png
-*.jpg
-*.mp4
-*.gif
-checkpoints/
-runs/
-wandb/
+*.json
+*.csv
 
-# Jupyter Notebooks
-.ipynb_checkpoints/
-*.ipynb
-
-# System
-.DS_Store
-Thumbs.db
-
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*~
