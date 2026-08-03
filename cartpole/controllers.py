@@ -14,11 +14,11 @@ class LQRController(LQRBase):
         Returns:
             Control forces of shape (num_envs,)
         """
-        cart_pos = observations["cart_position"][:, 0]
-        cart_vel = observations["cart_velocity"][:, 0]
-        pole_rot = observations["pole_rotation"]
-        pole_angle = 2 * torch.atan2(pole_rot[:, 1], pole_rot[:, 3])
-        pole_angular_vel = observations["pole_velocity"][:, 4]
-        state = torch.stack([cart_pos, cart_vel, pole_angle, pole_angular_vel], dim=1)
+        cart_pos = observations["cart_position"]
+        cart_vel = observations["cart_velocity"]
+        pole_ang = observations["pole_rotation"]
+        pole_ang_vel = observations["pole_velocity"]
+        state = torch.stack([cart_pos, cart_vel, pole_ang, pole_ang_vel], dim=1)
         K_tensor = torch.tensor(self.K, device=device, dtype=state.dtype)
-        return -(state * K_tensor).sum(dim=1)
+        control_force = -state@K_tensor
+        return control_force

@@ -1,37 +1,55 @@
-"""CartPole simulation using Isaac Sim's classic cartpole asset.
-
-This module loads the pre-built cartpole from Isaac Sim's asset library
-and applies LQR control with state logging to CSV files.
-"""
-
-import numpy as np
-import torch
-import csv
-from pathlib import Path
-
+# logistics
 import os
+from pathlib import Path
 from datetime import datetime
+
+# compute libraries
+import numpy as np
+import polars as pl
+import torch
 
 # Controllers
 from config import CartPolePhysicsConfig
 from controllers import LQRController
 
+from isaacsim import SimulationApp
+
+os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+CONFIG = {
+    "headless": False,
+    "active_gpu": 0,
+    "physics_gpu": 0,
+    "multi_gpu": False,
+}
+simulation_app = SimulationApp(CONFIG)
+
+# import world
+from isaacsim.core.api import World
+from isaacsim.core.prims import SingleArticulation
+from isaacsim.core.utils.stage import add_reference_to_stage
+from isaacsim.storage.native import get_assets_root_path
+from isaacsim.core.utils.types import ArticulationAction
+
+from pxr import PhysxSchema, Usd
+
+
 def get_cartpole_state(cartpole) -> dict:
-    """Extract state from the cartpole articulation.
-
+    '''
+    Extract state from cartpole USD object. 
     Args:
-        cartpole: Isaac Sim SingleArticulation instance (stable Core API)
-
+        cartpole USD object
     Returns:
-        Dictionary with cart_position, cart_velocity, pole_angle, pole_angular_vel
-    """
-    joint_positions = cartpole.get_joint_positions()  # Shape: (2,) for single env
-    joint_velocities = cartpole.get_joint_velocities()  # Shape: (2,) for single env
+        state dict: cart position, cart velocity, pole angle, and pole angular velocity
+
+    TODO: Scale for multi environment example. 
+    '''
+    joint_positions = cartpole.get_joint_positions()
+    joint_velocities = cartpole.get_joint_velocities()
 
     # State vector: [cart_pos, cart_vel, pole_angle, pole_angular_vel]
-    cart_position = float(joint_positions[0])  # Slider joint position
+    cart_position = float(joint_positions[0])
     cart_velocity = float(joint_velocities[0])
-    pole_angle = float(joint_positions[1])  # Revolute joint angle
+    pole_angle = float(joint_positions[1])
     pole_angular_vel = float(joint_velocities[1])
 
     return {
@@ -43,31 +61,20 @@ def get_cartpole_state(cartpole) -> dict:
 
 
 def apply_lqr_control(cartpole, controller, state: dict) -> float:
-    """Apply LQR control to the cartpole.
-
+    """
+    Apply LQR control to the cartpole.
     Args:
-        cartpole: Isaac Sim SingleArticulation instance (stable Core API)
-        controller: LQR controller
-        state: Current state dictionary
-
+        cartpole USD object, controller, and state
     Returns:
         Control force applied
     """
-    # Convert state to observations format expected by controller
-    # Note: The controller expects quaternion format for pole_rotation
-    # We create a simple quaternion from the pole angle (rotation around X-axis)
-    angle = state["pole_angle"]
-    qw = torch.cos(torch.tensor(angle) / 2).item()
-    qx = torch.sin(torch.tensor(angle) / 2).item()
-
     observations = {
-        "cart_position": torch.tensor([[state["cart_position"]]], device="cuda"),
-        "cart_velocity": torch.tensor([[state["cart_velocity"]]], device="cuda"),
-        "pole_rotation": torch.tensor([[qx, 0.0, 0.0, qw]], device="cuda"),  # Quaternion [x, y, z, w]
-        "pole_velocity": torch.tensor([[0.0, 0.0, 0.0, 0.0, state["pole_angular_vel"], 0.0]], device="cuda")
+        "cart_position": torch.tensor([state["cart_position"]], device="cuda"),
+        "cart_velocity": torch.tensor([state["cart_velocity"]], device="cuda"),
+        "pole_rotation": torch.tensor([state["pole_angle"]], device="cuda"),
+        "pole_velocity": torch.tensor([state["pole_angular_vel"]], device="cuda"),
     }
 
-    # Compute control force
     control_force = controller.compute_control(observations, device="cuda")
 
     # Apply action to cart joint (index 0)
@@ -79,190 +86,187 @@ def apply_lqr_control(cartpole, controller, state: dict) -> float:
 
     return control_force.item()
 
+def disable_sleep(stage):
+    """Stop PhysX from ever putting the cartpole to sleep.
 
-def run_simulation(my_world, cartpole, controller, num_steps: int = 20):
+    A sleeping articulation stops being integrated entirely: every link freezes
+    in place and ignores gravity and applied effort until something wakes it.
+    That is what pinned the pole at a non-equilibrium angle. Setting the sleep
+    threshold to 0 means the body's kinetic energy is never "below" it, so the
+    wake counter never expires and it never sleeps.
+
+    MUST be called before the first World.reset(): PhysX reads sleepThreshold
+    when it initializes the articulation at the first play, and authoring it
+    afterward never reaches the live actor.
+    """
+    root = stage.GetPrimAtPath("/World/cartpole")
+    PhysxSchema.PhysxArticulationAPI.Apply(root).CreateSleepThresholdAttr(0.0)
+    for path in ("/World/cartpole/cart", "/World/cartpole/pole"):
+        body = stage.GetPrimAtPath(path)
+        PhysxSchema.PhysxRigidBodyAPI.Apply(body).CreateSleepThresholdAttr(0.0)
+
+def set_initial_pole_state(stage, pole_angle_deg):
+    pole_joint = stage.GetPrimAtPath("/World/cartpole/cart/cart_to_pole")
+    state_api = PhysxSchema.JointStateAPI.Apply(pole_joint, "angular")
+    state_api.CreatePositionAttr(float(pole_angle_deg))
+    state_api.CreateVelocityAttr(0.0)
+
+
+def build_world(initial_pole_angle_deg: float = 0.0):
+    # build world and place cartpole
+    assets_root_path = get_assets_root_path()
+    asset_path = assets_root_path + "/Isaac/Robots/IsaacSim/Cartpole/cartpole.usd"
+
+    dt = 1.0/240.0
+    my_world = World(stage_units_in_meters=1.0, physics_dt=dt, backend="torch", device="cuda")
+    my_world.scene.add_default_ground_plane(z_position=-0.1)
+    add_reference_to_stage(usd_path=asset_path, prim_path="/World/cartpole")
+    cartpole = my_world.scene.add(
+        SingleArticulation(prim_path="/World/cartpole", name="cartpole")
+    )
+
+    set_initial_pole_state(my_world.stage, initial_pole_angle_deg)
+
+    my_world.reset()
+
+    # Read back after init to prove the setting survived (not silently reset).
+    root = my_world.stage.GetPrimAtPath("/World/cartpole")
+
+    # Register the pole's start angle as the articulation's DEFAULT joint state.
+    # World.reset() restores this automatically on every reset (cart at 0, pole
+    # at the selected angle, zero velocity), so no manual set is needed after a
+    # reset. Joint order is [cart, pole]. Must be after reset() (needs num_dof).
+    default_positions = torch.tensor([0.0, np.deg2rad(initial_pole_angle_deg)], dtype=torch.float32)
+    cartpole.set_joints_default_state(positions=default_positions, velocities=torch.zeros(2, dtype=torch.float32))
+
+    return my_world, cartpole
+
+def set_physics(my_world):
+    # Extract cartpole properties
+    stage = my_world.stage
+    cart_prim = stage.GetPrimAtPath("/World/cartpole/cart")
+    pole_prim = stage.GetPrimAtPath("/World/cartpole/pole")
+    pole_shape_prim = pole_prim.GetPrimAtPath("visuals/mesh_0")
+
+    cart_mass = cart_prim.GetAttribute('physics:mass').Get()
+    pole_mass = pole_prim.GetAttribute('physics:mass').Get()
+    pole_size = np.array(pole_shape_prim.GetAttribute('xformOp:scale').Get())
+
+    physics_config = CartPolePhysicsConfig(cart_mass=cart_mass, pole_mass=pole_mass, pole_length=pole_size[2])
+
+    return physics_config
+
+
+def run_simulation(my_world, cartpole, controller, duration: float = 5.0, debug_force=None):
     """Execute main simulation loop with LQR control and state logging.
 
     Args:
         my_world: Isaac Sim World instance
         cartpole: Cartpole articulation
         controller: LQR controller
-        num_steps: Number of simulation steps to run
+        duration: Seconds of simulated time to run. num_steps is derived from
+            this and the actual physics dt so changing dt doesn't change how
+            long the run lasts.
+        debug_force: If None, use the LQR controller (normal operation). If a
+            float, IGNORE the LQR and apply that constant effort to the cart
+            every step. Use 0.0 to watch the pole fall freely (no control -> if
+            it STILL freezes at ~-0.78, the cause is physical, not the
+            controller), or a large value (e.g. 50.0) to test whether the cart
+            responds to force at all.
     """
-    # Reset world
-    print("Resetting world...", flush=True)
+
     my_world.reset()
-
-    # Create log file
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    log_dir = Path("cartpole/logs/")
-    if not log_dir.exists(): log_dir.mkdir(parents=True)
-    log_file = f"cartpole/logs/state_log_{timestamp}.csv"
     
-    print(f"Starting simulation for {num_steps} steps...", flush=True)
-    print(f"Logging state to: {log_file}", flush=True)
+    physics_dt = my_world.get_physics_dt()
+    num_steps = round(duration / physics_dt)
+    print(f"physics_dt={physics_dt:.6f}s  duration={duration}s  num_steps={num_steps}", flush=True)
 
-    # Debug flag for first few steps
-    debug_steps = 3
+    step_history = np.zeros(num_steps)
+    time_history = np.zeros(num_steps)
+    cart_pos_history = np.zeros(num_steps)
+    cart_vel_history = np.zeros(num_steps)
+    pole_ang_history = np.zeros(num_steps)
+    pole_ang_vel_history = np.zeros(num_steps)
+    control_force_history = np.zeros(num_steps)
+    
+    # Simulation loop
+    for step in range(num_steps):
+        # gather state and apply force
+        state = get_cartpole_state(cartpole)
 
-    with open(log_file, 'w', newline='') as f:
-        writer = csv.writer(f)
-        writer.writerow(["step", "cart_position", "cart_velocity", "pole_angle", "pole_angular_vel", "control_force"])
-
-        # Simulation loop
-        for step in range(num_steps):
-            # Get state
-            state = get_cartpole_state(cartpole)
-
-            # Compute and apply control
+        if debug_force is None:
             control_force = apply_lqr_control(cartpole, controller, state)
+        else:
+            # DEBUG: bypass LQR, apply a constant effort to the cart joint.
+            control_force = float(debug_force)
+            cartpole.apply_action(ArticulationAction(joint_efforts=np.array([control_force, 0.0])))
 
-            # Debug output for first few steps
-            if True:
-                print(f"\n  DEBUG Step {step}:", flush=True)
-                print(f"    State: pos={state['cart_position']:.4f}, vel={state['cart_velocity']:.4f}, "
-                      f"angle={state['pole_angle']:.4f}, ang_vel={state['pole_angular_vel']:.4f}", flush=True)
-                print(f"    Computed force: {control_force:.4f} N", flush=True)
+        # Step physics
+        my_world.step(render=True)  # Enable rendering to see the simulation
 
-            # Log state
-            writer.writerow([
-                step,
-                state["cart_position"],
-                state["cart_velocity"],
-                state["pole_angle"],
-                state["pole_angular_vel"],
-                control_force
-            ])
+        t = my_world.current_time
+        # Log state
+        step_history[step] = step
+        time_history[step] = t
+        cart_pos_history[step] = state["cart_position"]
+        cart_vel_history[step] = state["cart_velocity"]
+        pole_ang_history[step] = state["pole_angle"]
+        pole_ang_vel_history[step] = state["pole_angular_vel"]
+        control_force_history[step] = control_force
 
-            # Step physics
-            my_world.step(render=True)  # Enable rendering to see the simulation
+        if (step + 1) % 1 == 0:
+            print(f"  Step {step + 1}/{num_steps} - t: {t:.4f} s, "
+                    f"angle: {state['pole_angle']:.4f} rad, "
+                    f"ang_vel: {state['pole_angular_vel']:.4f} rad/s, "
+                    f"cart: {state['cart_position']:.4f} m, "
+                    f"cart_vel: {state['cart_velocity']:.4f} m/s, Force: {control_force:.2f} N, ",
+                    flush=True)
 
-            # Print progress with control force info
-            if (step + 1) % 1 == 0:
-                print(f"  Step {step + 1}/{num_steps} - Pole angle: {state['pole_angle']:.4f} rad, "
-                      f"Cart pos: {state['cart_position']:.4f} m, Force: {control_force:.2f} N", flush=True)
 
-    print(f"\nSimulation complete! State log saved to: {log_file}", flush=True)
+    # Create log dir
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_dir = Path(f"cartpole/logs/log_{timestamp}")
+    if not log_dir.exists(): log_dir.mkdir(parents=True)
 
+    df = pl.DataFrame({
+        "step": step_history, 
+        "time": time_history,
+        "cart_position": cart_pos_history, 
+        "cart_velocity": cart_vel_history, 
+        "pole_angle": pole_ang_history, 
+        "pole_angular_vel": pole_ang_vel_history, 
+        "control_force": control_force_history,
+    })
+
+    file = str(log_dir / "log.parquet")
+    df.write_parquet(file)
+    print(f"File written to: {file}")
+    
+
+def main(Q, R):
+    # The pole's start angle becomes the articulation's default joint state, so
+    # every my_world.reset() (here and anywhere else) restores it automatically.
+    my_world, cartpole = build_world(initial_pole_angle_deg=2.0)
+    physics_config = set_physics(my_world)
+
+    A, B = physics_config.compute_system_matrices()
+
+    controller = LQRController(A, B, Q, R)
+
+    run_simulation(my_world, cartpole, controller, duration=1)
+
+    # Keep the app running
+    while simulation_app.is_running():
+        simulation_app.update()
+
+    for _ in range(10):
+        simulation_app.update()
+    simulation_app.close()
 
 if __name__ == "__main__":
-    # Force NVIDIA GPU on dual-GPU laptops
-    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
+    # Define LQR cost matrices
+    Q = np.diag([1.0, 1.0, 1000.0, 1000.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
+    R = np.array([[0.1]])  # Control cost weight
+    main(Q, R)    
 
-    print(">>> Loading SimulationApp (headless mode)...", flush=True)
-    from isaacsim import SimulationApp
-
-    CONFIG = {
-        "headless": False,
-        "active_gpu": 0,
-        "physics_gpu": 0,
-        "multi_gpu": False,
-    }
-
-    simulation_app = SimulationApp(CONFIG)
     
-    from isaacsim.core.api import World
-    from isaacsim.core.prims import SingleArticulation
-    from isaacsim.core.utils.stage import add_reference_to_stage
-    from isaacsim.storage.native import get_assets_root_path
-    from isaacsim.core.utils.types import ArticulationAction
-
-    my_world = None
-    try:
-        assets_root_path = get_assets_root_path()
-        asset_path = assets_root_path + "/Isaac/Robots/IsaacSim/Cartpole/cartpole.usd"
-
-        # Create world with standard units (1.0 meter)
-        my_world = World(stage_units_in_meters=1.0, backend="torch", device="cuda")
-        my_world.scene.add_default_ground_plane()
-
-        # Add cartpole asset to stage
-        add_reference_to_stage(usd_path=asset_path, prim_path="/World/cartpole")
-
-        # Wrap as articulation for easy control
-        cartpole = my_world.scene.add(
-            SingleArticulation(prim_path="/World/cartpole", name="cartpole")
-        )
-
-        # Reset to initialize the scene
-        my_world.reset()
-
-        # Debug: Print joint information
-        print(f"\n=== Joint Information ===", flush=True)
-        print(f"Number of DOF: {cartpole.num_dof}", flush=True)
-        print(f"Joint names: {cartpole.dof_names}", flush=True)
-
-        # Extract physical properties from the USD asset
-        from pxr import UsdPhysics, Usd, UsdGeom
-        stage = my_world.stage
-
-        print(f"\n=== USD Asset Properties ===", flush=True)
-
-        # Initialize variables for extracted properties
-        cart_mass = None
-        pole_mass = None
-        pole_length = None
-
-        # Extract properties directly from known paths (based on USD structure)
-        # Cart rigid body
-        cart_prim = stage.GetPrimAtPath("/World/cartpole/cart")
-        pole_prim = stage.GetPrimAtPath("/World/cartpole/pole")
-        pole_shape_prim = pole_prim.GetPrimAtPath("visuals/mesh_0")
-
-        cart_mass = cart_prim.GetAttribute('physics:mass').Get()
-        pole_mass = pole_prim.GetAttribute('physics:mass').Get()
-        pole_size = np.array(pole_shape_prim.GetAttribute('xformOp:scale').Get())
-        
-        # Configure joint drives for force control at USD level
-        # Disable stiffness/damping on cart joint (slider) to allow pure force control
-        cart_joint = UsdPhysics.DriveAPI.Get(stage.GetPrimAtPath("/World/cartpole/slider_to_cart"), "linear")
-        if cart_joint:
-            cart_joint.GetStiffnessAttr().Set(0.0)
-            cart_joint.GetDampingAttr().Set(0.0)
-            print(f"Configured cart joint for force control (stiffness=0, damping=0)", flush=True)
-
-        # Pole joint should be free to rotate (no control)
-        pole_joint = UsdPhysics.DriveAPI.Get(stage.GetPrimAtPath("/World/cartpole/cart_to_pole"), "angular")
-        if pole_joint:
-            pole_joint.GetStiffnessAttr().Set(0.0)
-            pole_joint.GetDampingAttr().Set(0.0)
-            print(f"Configured pole joint as free joint (stiffness=0, damping=0)", flush=True)
-
-        print(f"=========================\n", flush=True)
-
-        # Create config with default values, then override with USD values
-        physics_config = CartPolePhysicsConfig(cart_mass=cart_mass, pole_mass=pole_mass, pole_length=pole_length)
-
-        A, B = physics_config.compute_system_matrices()
-
-        # Define LQR cost matrices
-        Q = np.diag([10.0, 1.0, 1.0, 1.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
-        R = np.array([[0.1]])  # Control cost weight
-
-        controller = LQRController(A, B, Q, R)
-
-        # Run the simulation
-        run_simulation(my_world, cartpole, controller, num_steps=50)
-
-        # Keep IsaacSim open for user interaction
-        print("\n" + "="*60, flush=True)
-        print("Simulation steps complete!", flush=True)
-        print("IsaacSim will remain open for inspection.", flush=True)
-        print("Close the window when you're done.", flush=True)
-        print("="*60 + "\n", flush=True)
-
-        # Keep the app running until user closes it manually
-        while simulation_app.is_running():
-            simulation_app.update()
-
-    except Exception as e:
-        print(f"\n*** ERROR: {e} ***", flush=True)
-        import traceback
-        traceback.print_exc()
-    finally:
-        print("\nShutting down...", flush=True)
-        # Windows workaround: add multiple update() calls before close()
-        # to properly clean up threads (known issue in Isaac Sim on Windows)
-        for _ in range(10):
-            simulation_app.update()
-        simulation_app.close()

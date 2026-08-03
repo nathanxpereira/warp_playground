@@ -7,4 +7,5 @@
 # Results & Generated Files
 *.json
 *.csv
-
+*.parquet
+*.html
