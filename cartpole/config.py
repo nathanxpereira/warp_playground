@@ -9,10 +9,9 @@ class CartPolePhysicsConfig:
 
         if cart_mass is None: raise Exception("Cart Mass cannot be None")
         if pole_mass is None: raise Exception("Pole Mass cannot be None")
-        if pole_length is None: 
-            pole_length = 1.0 
-            print("Pole length cannot be None. Setting as 1.0")
+        if pole_length is None: raise Exception("Pole length cannot be None")
 
+        print(f"Cart Mass: {cart_mass}\nPole Mass: {pole_mass}\nPole Length: {pole_length}")
         # Cart parameters
         self.cart_mass: float = cart_mass
 

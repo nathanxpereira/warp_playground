@@ -1,22 +1,17 @@
-"""Performance metrics for scoring a closed-loop cartpole trajectory.
-
-Deliberately independent of the LQR design cost (x'Qx + u'Ru): for any (Q, R)
-the Riccati solution is already optimal for that same cost, so scoring
-candidates by their own design cost during a search would be circular.
-"""
-
 import numpy as np
 
-
 def settling_time(t: np.ndarray, angle: np.ndarray, tol: float = 0.05) -> float:
-    """Last time |angle| exceeds tol; np.inf if it never stays within tol."""
-    pass
+    angle_flag = np.abs(angle[1:]-angle[:-1]) < tol
+    last_t = angle[1:][angle_flag]
+    return last_t[-1] if len(last_t) else np.inf
 
 
 def overshoot(angle: np.ndarray, x0_angle: float) -> float:
-    """Max |angle| reached beyond the initial deviation, as a fraction of x0_angle."""
-    pass
+    """
+    Max |angle| reached beyond the initial deviation, as a fraction of x0_angle.
+    """
+    return np.max(np.abs(angle))/x0_angle
 
 
 def max_abs_force(u: np.ndarray) -> float:
-    pass
+    return np.max(np.abs(u))

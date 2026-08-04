@@ -60,7 +60,7 @@ def get_cartpole_state(cartpole) -> dict:
     }
 
 
-def apply_lqr_control(cartpole, controller, state: dict) -> float:
+def apply_control(cartpole, controller, state: dict) -> float:
     """
     Apply LQR control to the cartpole.
     Args:
@@ -77,33 +77,13 @@ def apply_lqr_control(cartpole, controller, state: dict) -> float:
 
     control_force = controller.compute_control(observations, device="cuda")
 
-    # Apply action to cart joint (index 0)
-    # Force on cart (index 0), no torque on pole (index 1)
-    action = ArticulationAction(
-        joint_efforts=np.array([control_force.item(), 0.0])
-    )
+    # joints = ['slider_to_cart', 'cart_to_pole'] 
+    # apply force to the first joint, but not second
+    joint_efforts = np.array([control_force.item(), 0.0])
+    action = ArticulationAction(joint_efforts=joint_efforts)
     cartpole.apply_action(action)
 
     return control_force.item()
-
-def disable_sleep(stage):
-    """Stop PhysX from ever putting the cartpole to sleep.
-
-    A sleeping articulation stops being integrated entirely: every link freezes
-    in place and ignores gravity and applied effort until something wakes it.
-    That is what pinned the pole at a non-equilibrium angle. Setting the sleep
-    threshold to 0 means the body's kinetic energy is never "below" it, so the
-    wake counter never expires and it never sleeps.
-
-    MUST be called before the first World.reset(): PhysX reads sleepThreshold
-    when it initializes the articulation at the first play, and authoring it
-    afterward never reaches the live actor.
-    """
-    root = stage.GetPrimAtPath("/World/cartpole")
-    PhysxSchema.PhysxArticulationAPI.Apply(root).CreateSleepThresholdAttr(0.0)
-    for path in ("/World/cartpole/cart", "/World/cartpole/pole"):
-        body = stage.GetPrimAtPath(path)
-        PhysxSchema.PhysxRigidBodyAPI.Apply(body).CreateSleepThresholdAttr(0.0)
 
 def set_initial_pole_state(stage, pole_angle_deg):
     pole_joint = stage.GetPrimAtPath("/World/cartpole/cart/cart_to_pole")
@@ -117,7 +97,7 @@ def build_world(initial_pole_angle_deg: float = 0.0):
     assets_root_path = get_assets_root_path()
     asset_path = assets_root_path + "/Isaac/Robots/IsaacSim/Cartpole/cartpole.usd"
 
-    dt = 1.0/240.0
+    dt = 1.0/60.0
     my_world = World(stage_units_in_meters=1.0, physics_dt=dt, backend="torch", device="cuda")
     my_world.scene.add_default_ground_plane(z_position=-0.1)
     add_reference_to_stage(usd_path=asset_path, prim_path="/World/cartpole")
@@ -129,13 +109,7 @@ def build_world(initial_pole_angle_deg: float = 0.0):
 
     my_world.reset()
 
-    # Read back after init to prove the setting survived (not silently reset).
-    root = my_world.stage.GetPrimAtPath("/World/cartpole")
-
-    # Register the pole's start angle as the articulation's DEFAULT joint state.
-    # World.reset() restores this automatically on every reset (cart at 0, pole
-    # at the selected angle, zero velocity), so no manual set is needed after a
-    # reset. Joint order is [cart, pole]. Must be after reset() (needs num_dof).
+    # must be after reset to set the defaults. slider_to_cart not changed. 
     default_positions = torch.tensor([0.0, np.deg2rad(initial_pole_angle_deg)], dtype=torch.float32)
     cartpole.set_joints_default_state(positions=default_positions, velocities=torch.zeros(2, dtype=torch.float32))
 
@@ -157,22 +131,12 @@ def set_physics(my_world):
     return physics_config
 
 
-def run_simulation(my_world, cartpole, controller, duration: float = 5.0, debug_force=None):
-    """Execute main simulation loop with LQR control and state logging.
+def run_simulation(my_world, cartpole, controller, duration: float = 1.0):
+    """
+    Main simulation loop with LQR control and state logging.
 
     Args:
-        my_world: Isaac Sim World instance
-        cartpole: Cartpole articulation
-        controller: LQR controller
-        duration: Seconds of simulated time to run. num_steps is derived from
-            this and the actual physics dt so changing dt doesn't change how
-            long the run lasts.
-        debug_force: If None, use the LQR controller (normal operation). If a
-            float, IGNORE the LQR and apply that constant effort to the cart
-            every step. Use 0.0 to watch the pole fall freely (no control -> if
-            it STILL freezes at ~-0.78, the cause is physical, not the
-            controller), or a large value (e.g. 50.0) to test whether the cart
-            responds to force at all.
+        my_world, controller, duration (s)
     """
 
     my_world.reset()
@@ -181,38 +145,34 @@ def run_simulation(my_world, cartpole, controller, duration: float = 5.0, debug_
     num_steps = round(duration / physics_dt)
     print(f"physics_dt={physics_dt:.6f}s  duration={duration}s  num_steps={num_steps}", flush=True)
 
-    step_history = np.zeros(num_steps)
-    time_history = np.zeros(num_steps)
-    cart_pos_history = np.zeros(num_steps)
-    cart_vel_history = np.zeros(num_steps)
-    pole_ang_history = np.zeros(num_steps)
-    pole_ang_vel_history = np.zeros(num_steps)
-    control_force_history = np.zeros(num_steps)
+    history = {
+        "step": np.zeros(num_steps), 
+        "time": np.zeros(num_steps),
+        "cart_position": np.zeros(num_steps), 
+        "cart_velocity": np.zeros(num_steps), 
+        "pole_angle": np.zeros(num_steps), 
+        "pole_angular_vel": np.zeros(num_steps), 
+        "control_force": np.zeros(num_steps),
+    }
     
     # Simulation loop
     for step in range(num_steps):
         # gather state and apply force
         state = get_cartpole_state(cartpole)
-
-        if debug_force is None:
-            control_force = apply_lqr_control(cartpole, controller, state)
-        else:
-            # DEBUG: bypass LQR, apply a constant effort to the cart joint.
-            control_force = float(debug_force)
-            cartpole.apply_action(ArticulationAction(joint_efforts=np.array([control_force, 0.0])))
+        control_force = apply_control(cartpole, controller, state)
 
         # Step physics
-        my_world.step(render=True)  # Enable rendering to see the simulation
+        my_world.step()  # Enable rendering to see the simulation
 
         t = my_world.current_time
         # Log state
-        step_history[step] = step
-        time_history[step] = t
-        cart_pos_history[step] = state["cart_position"]
-        cart_vel_history[step] = state["cart_velocity"]
-        pole_ang_history[step] = state["pole_angle"]
-        pole_ang_vel_history[step] = state["pole_angular_vel"]
-        control_force_history[step] = control_force
+        history['step'][step] = step
+        history['time'][step] = t
+        history['cart_position'][step] = state["cart_position"]
+        history['cart_velocity'][step] = state["cart_velocity"]
+        history['pole_angle'][step] = state["pole_angle"]
+        history['pole_angular_vel'][step] = state["pole_angular_vel"]
+        history['control_force'][step] = control_force
 
         if (step + 1) % 1 == 0:
             print(f"  Step {step + 1}/{num_steps} - t: {t:.4f} s, "
@@ -222,31 +182,19 @@ def run_simulation(my_world, cartpole, controller, duration: float = 5.0, debug_
                     f"cart_vel: {state['cart_velocity']:.4f} m/s, Force: {control_force:.2f} N, ",
                     flush=True)
 
+    df = pl.DataFrame(history)
 
     # Create log dir
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     log_dir = Path(f"cartpole/logs/log_{timestamp}")
     if not log_dir.exists(): log_dir.mkdir(parents=True)
 
-    df = pl.DataFrame({
-        "step": step_history, 
-        "time": time_history,
-        "cart_position": cart_pos_history, 
-        "cart_velocity": cart_vel_history, 
-        "pole_angle": pole_ang_history, 
-        "pole_angular_vel": pole_ang_vel_history, 
-        "control_force": control_force_history,
-    })
-
     file = str(log_dir / "log.parquet")
     df.write_parquet(file)
     print(f"File written to: {file}")
-    
 
-def main(Q, R):
-    # The pole's start angle becomes the articulation's default joint state, so
-    # every my_world.reset() (here and anywhere else) restores it automatically.
-    my_world, cartpole = build_world(initial_pole_angle_deg=2.0)
+def main(Q, R, pole_angle=0.0):
+    my_world, cartpole = build_world(initial_pole_angle_deg=pole_angle)
     physics_config = set_physics(my_world)
 
     A, B = physics_config.compute_system_matrices()
@@ -255,7 +203,7 @@ def main(Q, R):
 
     run_simulation(my_world, cartpole, controller, duration=1)
 
-    # Keep the app running
+    # Keep the app running. Does not restart sim. Need to fix. 
     while simulation_app.is_running():
         simulation_app.update()
 
@@ -265,8 +213,9 @@ def main(Q, R):
 
 if __name__ == "__main__":
     # Define LQR cost matrices
-    Q = np.diag([1.0, 1.0, 1000.0, 1000.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
+    pole_angle = 2.0
+    Q = np.diag([1.0, 1.0, 10.0, 10.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
     R = np.array([[0.1]])  # Control cost weight
-    main(Q, R)    
+    main(Q, R, pole_angle)    
 
     
