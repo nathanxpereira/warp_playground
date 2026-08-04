@@ -71,8 +71,9 @@ $$
 Solve for $\ddot{x}$ and $\ddot\theta$
 $$
 \begin{align*}
-\ddot\theta&=\frac{\frac{ml}{2}g(M+m)\sin\theta-\left(\frac{ml}{2}\right)^2 \dot\theta^2\sin\theta\cos\theta-\frac{ml}{2}F\cos\theta}{I_p(M+m)-\left(\frac{ml}{2}\right)^2\cos^2\theta}\\
-\ddot{x}&=\frac{I_pF+\frac{ml}{2}I_p\dot\theta^2\sin\theta-\left(\frac{ml}{2}\right)^2g\sin\theta\cos\theta}{I_p(M+m)-\left(\frac{ml}{2}\right)^2\cos^2\theta}
+
+\ddot{x}&=\frac{-\left(\frac{ml}{2}\right)^2g\sin\theta\cos\theta+\frac{ml}{2}I_p\dot\theta^2\sin\theta+I_pF}{I_p(M+m)-\left(\frac{ml}{2}\right)^2\cos^2\theta}\\
+\ddot\theta&=\frac{\frac{ml}{2}g(M+m)\sin\theta-\left(\frac{ml}{2}\right)^2 \dot\theta^2\sin\theta\cos\theta-\frac{ml}{2}F\cos\theta}{I_p(M+m)-\left(\frac{ml}{2}\right)^2\cos^2\theta}
 \end{align*}
 $$
 Linearize
