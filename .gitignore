@@ -1,8 +1,7 @@
 # Python
 */**/__pycache__/
 *.egg-info/
-.venv/
-.claude/
+.*/
 
 # Results & Generated Files
 *.json
