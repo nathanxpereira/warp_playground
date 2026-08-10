@@ -125,8 +125,7 @@ def set_physics(my_world):
     cart_mass = cart_prim.GetAttribute('physics:mass').Get()
     pole_mass = pole_prim.GetAttribute('physics:mass').Get()
     pole_size = np.array(pole_shape_prim.GetAttribute('xformOp:scale').Get())
-
-    physics_config = CartPolePhysicsConfig(cart_mass=cart_mass, pole_mass=pole_mass, pole_length=pole_size[2])
+    physics_config = CartPolePhysicsConfig(cart_mass=cart_mass, pole_mass=pole_mass, pole_length=pole_size[2], pole_diam=pole_size[1])
 
     return physics_config
 
@@ -201,7 +200,7 @@ def main(Q, R, pole_angle=0.0):
 
     controller = LQRController(A, B, Q, R)
 
-    run_simulation(my_world, cartpole, controller, duration=1)
+    run_simulation(my_world, cartpole, controller, duration=10)
 
     # Keep the app running. Does not restart sim. Need to fix. 
     while simulation_app.is_running():
@@ -214,8 +213,8 @@ def main(Q, R, pole_angle=0.0):
 if __name__ == "__main__":
     # Define LQR cost matrices
     pole_angle = 2.0
-    Q = np.diag([1.0, 1.0, 10.0, 10.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
-    R = np.array([[0.1]])  # Control cost weight
+    Q = np.diag([0.1, 0.00001, 0.1, 1.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
+    R = np.array([[10]])  # Control cost weight
     main(Q, R, pole_angle)    
 
     

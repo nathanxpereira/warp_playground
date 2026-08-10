@@ -1,8 +1,9 @@
 ## Problem Statement
-We are trying to solve the "Cartpole" problem. A pole is positioned on a cart and the cart moves side to side to balance the pole vertically. 
+The "Cartpole" problem is set up by placing a pole attached to a cart on a rotating hinge about the end of the pole. The objective is to balance the pole upright by moving the cart side to side. This is a classic controls problem and a base case for controls problems. 
 
-We are importing the NVIDIA built in model for the cartpole, which is a rectangle for the cart body, and a rectangnle as the pole. 
+The problem will first be studied individually in simulation, and then we will test it against NVIDIA's Isaac Sim to see how it translates. 
 
+## System Setup
 Let $x$ be the state of the system, and $\mu$ be a scalar horrizontal force applied to the cart. 
 
 See the appendix for the system derivation. 
