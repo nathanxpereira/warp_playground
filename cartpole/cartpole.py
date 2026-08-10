@@ -46,7 +46,6 @@ def get_cartpole_state(cartpole) -> dict:
     joint_positions = cartpole.get_joint_positions()
     joint_velocities = cartpole.get_joint_velocities()
 
-    # State vector: [cart_pos, cart_vel, pole_angle, pole_angular_vel]
     cart_position = float(joint_positions[0])
     cart_velocity = float(joint_velocities[0])
     pole_angle = float(joint_positions[1])
@@ -200,7 +199,7 @@ def main(Q, R, pole_angle=0.0):
 
     controller = LQRController(A, B, Q, R)
 
-    run_simulation(my_world, cartpole, controller, duration=10)
+    run_simulation(my_world, cartpole, controller, duration=8)
 
     # Keep the app running. Does not restart sim. Need to fix. 
     while simulation_app.is_running():
@@ -213,7 +212,7 @@ def main(Q, R, pole_angle=0.0):
 if __name__ == "__main__":
     # Define LQR cost matrices
     pole_angle = 2.0
-    Q = np.diag([0.1, 0.00001, 0.1, 1.0])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
+    Q = np.diag([1.0, 100, 1.0, 100])  # State cost weights [cart_pos, cart_vel, pole_angle, pole_vel]
     R = np.array([[10]])  # Control cost weight
     main(Q, R, pole_angle)    
 

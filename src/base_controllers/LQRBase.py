@@ -38,4 +38,4 @@ class LQRBase(Controller):
         return np.all(np.real(eigs.eigenvalues)<0)
     
     def compute_control(self, observations: dict, device) -> torch.Tensor:
-        raise Exception("Not Implemented")
+        raise NotImplementedError()
